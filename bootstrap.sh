@@ -52,7 +52,7 @@ Usage: bootstrap.sh [--dev | --custom]
 Tiers:
   (default)       Docker, Docker Compose, lazydocker, shell aliases
   --dev           Everything in base + fd, ripgrep, lazygit
-  --custom        Reads from spinup.yaml config file
+  --custom        Base + user-defined tools from ~/.config/spinup/spinup.yaml
 
 Examples:
   curl -sSL .../bootstrap.sh | bash
@@ -126,6 +126,13 @@ action_ing() {
   case "$1" in
   aliases) echo "Configuring" ;;
   *) echo "Installing" ;;
+  esac
+}
+
+action_past() {
+  case "$1" in
+  aliases) echo "configured" ;;
+  *) echo "installed" ;;
   esac
 }
 
@@ -268,6 +275,23 @@ parse_args() {
 }
 
 # ---------------------------------------------------------------------------
+# Summary — printed on failure so the user can see what succeeded
+# ---------------------------------------------------------------------------
+print_summary() {
+  printf '\n  %b── Summary ─────────────────────%b\n' "$BOLD" "$NC" >&2
+  for entry in "$@"; do
+    local status="${entry%%:*}"
+    local tool="${entry#*:}"
+    if [[ "$status" == "OK" ]]; then
+      printf '    %-14s %b✓ OK%b\n' "$tool" "$GREEN" "$NC" >&2
+    else
+      printf '    %-14s %b✗ FAIL%b  ← see %s\n' "$tool" "$RED" "$NC" "$SPINUP_LOG" >&2
+    fi
+  done
+  printf '\n' >&2
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -304,6 +328,7 @@ main() {
   # --- Install pending tools ---
   local total=${#pending[@]}
   local step=0
+  local -a results=()
   for tool in "${pending[@]}"; do
     ((++step))
     local action
@@ -321,12 +346,23 @@ main() {
     set -e
 
     if ((rc == 0)); then
-      printf '  %b[ OK ]%b %s %sed\n' "$GREEN" "$NC" "$tool" "$action" >&2
+      local past
+      past=$(action_past "$tool")
+      printf '  %b[ OK ]%b %s %s\n' "$GREEN" "$NC" "$tool" "$past" >&2
+      results+=("OK:$tool")
     else
-      printf '  %b[FAIL]%b %s failed — see %s\n' "$RED" "$NC" "$tool" "$SPINUP_LOG" >&2
+      results+=("FAIL:$tool")
+      print_summary "${results[@]}"
       exit "$rc"
     fi
   done
+
+  # --- Custom tier ---
+  if [[ "$TIER" == "custom" ]]; then
+    # shellcheck source=lib/custom.sh
+    source "$(dirname "$0")/lib/custom.sh"
+    run_custom
+  fi
 
   ensure_docker_group
 
