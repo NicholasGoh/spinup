@@ -17,7 +17,7 @@ BOLD='\033[1m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
 
-TOOLS_BASE=(docker lazydocker aliases)
+TOOLS_BASE=(docker lazydocker aliases tmux)
 TOOLS_DEV=(fd ripgrep lazygit)
 
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ show_usage() {
 Usage: bootstrap.sh [--dev | --custom]
 
 Tiers:
-  (default)       Docker, Docker Compose, lazydocker, shell aliases
+  (default)       Docker, Docker Compose, lazydocker, shell aliases, tmux config
   --dev           Everything in base + fd, ripgrep, lazygit
   --custom        Base + user-defined tools from ~/.config/spinup/spinup.yaml
 
@@ -109,6 +109,7 @@ is_installed() {
   docker) has_cmd docker ;;
   lazydocker) has_cmd lazydocker ;;
   aliases) [[ -f "$SPINUP_ALIASES_FILE" ]] ;;
+  tmux) [[ -f "$HOME/.tmux.conf" ]] && grep -q "spinup" "$HOME/.tmux.conf" 2>/dev/null ;;
   fd) has_cmd fdfind || has_cmd fd ;;
   ripgrep) has_cmd rg ;;
   lazygit) has_cmd lazygit ;;
@@ -117,21 +118,21 @@ is_installed() {
 
 action_word() {
   case "$1" in
-  aliases) echo "configure" ;;
+  aliases | tmux) echo "configure" ;;
   *) echo "install" ;;
   esac
 }
 
 action_ing() {
   case "$1" in
-  aliases) echo "Configuring" ;;
+  aliases | tmux) echo "Configuring" ;;
   *) echo "Installing" ;;
   esac
 }
 
 action_past() {
   case "$1" in
-  aliases) echo "configured" ;;
+  aliases | tmux) echo "configured" ;;
   *) echo "installed" ;;
   esac
 }
@@ -234,11 +235,168 @@ ALIASES
   fi
 }
 
+setup_tmux() {
+  local home
+  home=$(eval echo "~$(get_real_user)")
+  local tmux_dir="${home}/.tmux"
+  mkdir -p "$tmux_dir"
+
+  # --- .tmux.conf ---
+  cat >"${home}/.tmux.conf" <<'TMUXCONF'
+# spinup tmux config — managed by bootstrap.sh
+set -g default-terminal "tmux-256color"
+set -sg escape-time 10
+set -g mouse on
+set -g pane-border-status off
+set -g pane-border-format "#{?pane_active,#[fg=#fe8019] ❯ ,#[fg=colour240] ❯ }#(echo #{pane_current_path} | sed \"s|$HOME|~|\")"
+set-hook -g window-layout-changed 'if-shell -F "#{>:#{window_panes},1}" "set pane-border-status top" "set pane-border-status off"'
+set -g pane-active-border-style "fg=#fe8019"
+set -g pane-border-style "fg=colour240"
+
+bind v split-window -h -c "#{pane_current_path}"
+bind s split-window -c "#{pane_current_path}"
+bind c new-window -c "#{pane_current_path}"
+
+# vim-like pane switch with repeat
+bind k select-pane -U
+bind j select-pane -D
+bind h select-pane -L
+bind l select-pane -R
+bind / copy-mode \; command-prompt -T search -p "(search down)" "send-keys -X search-forward '%%'"
+bind ? copy-mode \; command-prompt -T search -p "(search up)" "send-keys -X search-backward '%%'"
+bind r source-file ~/.tmux.conf \; display-message "  Tmux config reloaded"
+bind i display-message "   System Uptime: #(uptime | cut -d',' -f1)"
+
+set-window-option -g visual-bell on
+set-window-option -g bell-action other
+
+# ─── GRUVBOX DARK POWERLINE THEME ───────────────────────────────────────
+
+# Status bar base
+set -g status-style "bg=#282828,fg=#ebdbb2"
+set -g status-left-length 100
+set -g status-right-length 150
+
+# Window status
+set -g window-status-separator ""
+set -g window-status-format "#[fg=#83a598,bg=#282828] #I:#W "
+set -g window-status-current-format "#[fg=#282828,bg=#fe8019,bold] #I:#W #[fg=#fe8019,bg=#282828]"
+
+# ─── PREFIX + STATUSLINE: auto-detect environment ─────────────────────
+unbind-key C-b
+unbind-key C-p
+if-shell 'test -f /.dockerenv || test -f /run/.containerenv' \
+  'source-file ~/.tmux/statusline-container.conf' \
+  'if-shell "test -n \"$SSH_CONNECTION\"" \
+    "source-file ~/.tmux/statusline-remote.conf" \
+    "source-file ~/.tmux/statusline-local.conf"'
+TMUXCONF
+
+  # --- statusline-container.conf ---
+  cat >"${tmux_dir}/statusline-container.conf" <<'CONTAINER'
+# ─── CONTAINER PROFILE ─────────────────────────────────────────────────
+# Prefix: C-f | Left: magenta | Right: [GPU] → CPU → time
+
+set-option -g prefix C-f
+bind-key C-f send-prefix
+
+# Left: prefix badge (dark) → magenta Powerline
+set -g status-left "#[fg=#ebdbb2,bg=#504945,bold] #(tmux show-option -gv prefix) #[fg=#504945,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold]  CONTAINER: #(whoami)@#H #[fg=#d3869b,bg=#282828]"
+
+# Right: with GPU → CPU → time, or just CPU → time
+if-shell 'command -v nvidia-smi >/dev/null 2>&1' {
+  set -g status-right "\
+#[fg=#282828,bg=#fabd2f]#[fg=#282828,bg=#fabd2f,bold] 󰢮 #(nvidia-smi --query-gpu=name --format=csv,noheader | awk '{print \$3\$4}') #(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)%% [#(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '{printf \"%.1f\", \$1 / 1024}')G/#(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | awk '{printf \"%.0f\", \$1 / 1024}')G] \
+#[fg=#fabd2f,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+} {
+  set -g status-right "\
+#[fg=#282828,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+}
+CONTAINER
+
+  # --- statusline-remote.conf ---
+  cat >"${tmux_dir}/statusline-remote.conf" <<'REMOTE'
+# ─── REMOTE / SSH PROFILE ─────────────────────────────────────────────
+# Prefix: C-s | Left: blue | Right: [GPU] → CPU → time
+
+set-option -g prefix C-s
+bind-key C-s send-prefix
+
+# Left: prefix badge (dark) → blue Powerline
+set -g status-left "#[fg=#ebdbb2,bg=#504945,bold] #(tmux show-option -gv prefix) #[fg=#504945,bg=#83a598]#[fg=#282828,bg=#83a598,bold] 󰌘 REMOTE: #(whoami)@#H #[fg=#83a598,bg=#282828]"
+
+# Right: with GPU → CPU → time, or just CPU → time
+if-shell 'command -v nvidia-smi >/dev/null 2>&1' {
+  set -g status-right "\
+#[fg=#282828,bg=#fabd2f]#[fg=#282828,bg=#fabd2f,bold] 󰢮 #(nvidia-smi --query-gpu=name --format=csv,noheader | awk '{print \$3\$4}') #(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)%% [#(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '{printf \"%.1f\", \$1 / 1024}')G/#(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | awk '{printf \"%.0f\", \$1 / 1024}')G] \
+#[fg=#fabd2f,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+} {
+  set -g status-right "\
+#[fg=#282828,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+}
+REMOTE
+
+  # --- statusline-local.conf ---
+  cat >"${tmux_dir}/statusline-local.conf" <<'LOCAL'
+# ─── LOCAL / HOST PROFILE ──────────────────────────────────────────────
+# Prefix: C-a | Left: green | Right: [GPU] → CPU → time
+
+set-option -g prefix C-a
+bind-key C-a send-prefix
+
+# Left: prefix badge (dark) → green Powerline
+set -g status-left "#[fg=#ebdbb2,bg=#504945,bold] #(tmux show-option -gv prefix) #[fg=#504945,bg=#b8bb26]#[fg=#282828,bg=#b8bb26,bold] 󰟀 #(whoami)@#H #[fg=#b8bb26,bg=#282828]"
+
+# Right: with GPU → CPU → time, or just CPU → time
+if-shell 'command -v nvidia-smi >/dev/null 2>&1' {
+  set -g status-right "\
+#[fg=#282828,bg=#fabd2f]#[fg=#282828,bg=#fabd2f,bold] 󰢮 #(nvidia-smi --query-gpu=name --format=csv,noheader | awk '{print \$3\$4}') #(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)%% [#(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '{printf \"%.1f\", \$1 / 1024}')G/#(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | awk '{printf \"%.0f\", \$1 / 1024}')G] \
+#[fg=#fabd2f,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+} {
+  set -g status-right "\
+#[fg=#282828,bg=#d3869b]#[fg=#282828,bg=#d3869b,bold] 󰘚 #(top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%%* id.*/\\1/' | awk '{printf \"%.0f\", 100 - \$1}')%% #(free -g | grep Mem | awk '{print \$3 \"G/\" \$2 \"G\"}') \
+#[fg=#d3869b,bg=#8ec07c]#[fg=#282828,bg=#8ec07c,bold] 󰥔 %b %d %l:%M%p "
+}
+LOCAL
+
+  # --- gpu-segment.sh ---
+  cat >"${tmux_dir}/gpu-segment.sh" <<'GPUSEG'
+#!/usr/bin/env bash
+# GPU info helper for tmux statusline
+# Outputs "MODEL UTIL% [USED_G/TOTAL_G]" or nothing if nvidia-smi is unavailable
+# Can be used standalone: #(~/.tmux/gpu-segment.sh)
+
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+  exit 0
+fi
+
+model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | awk '{print $3$4}')
+util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null)
+vram_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | awk '{printf "%.1f", $1 / 1024}')
+vram_total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{printf "%.0f", $1 / 1024}')
+
+if [ -z "$model" ]; then
+  exit 0
+fi
+
+printf "󰢮 %s %s%%%% [%sG/%sG]" "$model" "$util" "$vram_used" "$vram_total"
+GPUSEG
+  chmod +x "${tmux_dir}/gpu-segment.sh"
+
+  echo "Wrote ~/.tmux.conf and ~/.tmux/ statusline configs"
+}
+
 run_install() {
   case "$1" in
   docker) install_docker ;;
   lazydocker) install_lazydocker ;;
   aliases) setup_aliases ;;
+  tmux) setup_tmux ;;
   fd) install_fd ;;
   ripgrep) install_rg ;;
   lazygit) install_lazygit ;;
