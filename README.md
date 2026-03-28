@@ -20,9 +20,14 @@ Terraform templates for provisioning VMs — just `.tf` files you clone and run.
 ## Quick Start
 
 ```bash
-# Base tier (docker, lazydocker, aliases)
-curl -sSL https://raw.githubusercontent.com/NicholasGoh/spinup/f257023eccf34c28162f134ff2df0bbe5451f3d2/bootstrap.sh | bash
+# Run directly
+curl -sSL https://github.com/NicholasGoh/spinup/releases/latest/download/bootstrap.sh | bash
+
+# Or verify first
+curl -sSLO https://github.com/NicholasGoh/spinup/releases/latest/download/bootstrap.sh
+curl -sSLO https://github.com/NicholasGoh/spinup/releases/latest/download/bootstrap.sh.sha256
+sha256sum -c bootstrap.sh.sha256 && bash bootstrap.sh
 
 # Dev tier (base + fd, ripgrep, lazygit)
-curl -sSL https://raw.githubusercontent.com/NicholasGoh/spinup/f257023eccf34c28162f134ff2df0bbe5451f3d2/bootstrap.sh | bash -s -- --dev
+curl -sSL https://github.com/NicholasGoh/spinup/releases/latest/download/bootstrap.sh | bash -s -- --dev
 ```

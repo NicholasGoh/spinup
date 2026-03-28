@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble bootstrap.sh
+        run: bash scripts/assemble.sh > bootstrap.sh
+
+      - name: Syntax check
+        run: bash -n bootstrap.sh
+
+      - name: Generate SHA256
+        run: sha256sum bootstrap.sh > bootstrap.sh.sha256
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bootstrap.sh
+            bootstrap.sh.sha256
+          generate_release_notes: true

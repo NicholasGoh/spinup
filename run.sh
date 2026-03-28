@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "=== Assembling bootstrap.sh ==="
+bash scripts/assemble.sh > bootstrap.sh
+bash -n bootstrap.sh
+echo "  Syntax OK"
+
 docker build -f Dockerfile -t spinup-test .
 
 echo ""

@@ -9,8 +9,7 @@ RUN useradd -m -s /bin/bash testuser \
     && echo "testuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/testuser
 
 COPY bootstrap.sh /home/testuser/bootstrap.sh
-COPY lib/ /home/testuser/lib/
-RUN chmod +x /home/testuser/bootstrap.sh && chown -R testuser:testuser /home/testuser/bootstrap.sh /home/testuser/lib/
+RUN chmod +x /home/testuser/bootstrap.sh && chown testuser:testuser /home/testuser/bootstrap.sh
 
 USER testuser
 WORKDIR /home/testuser

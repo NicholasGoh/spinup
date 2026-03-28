@@ -1,0 +1,22 @@
+# spinup shell aliases — managed by bootstrap.sh
+alias lzd="lazydocker"
+alias lzg="lazygit"
+
+alias c="clear"
+command -v fdfind &>/dev/null && alias fd="fdfind"
+
+declare -A docker_cmds=(
+    ["d"]="docker"
+    ["dc"]="docker compose"
+)
+
+for prefix in "${!docker_cmds[@]}"; do
+    cmd="${docker_cmds[$prefix]}"
+    alias "$prefix=$cmd"
+
+    eval "
+    ${prefix}E() { $cmd exec -it \"\$@\"; }
+    ${prefix}P() { $cmd ps -a \"\$@\"; }
+    ${prefix}L() { $cmd logs -f \"\$@\"; }
+    "
+done
